@@ -6,15 +6,21 @@
 package cookiejar
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mitchellh/go-homedir"
 )
 
 // PublicSuffixList provides the public suffix of a domain. For example:
@@ -54,6 +60,7 @@ type Options struct {
 	// secure: it means that the HTTP server for foo.co.uk can set a cookie
 	// for bar.co.uk.
 	PublicSuffixList PublicSuffixList
+	Path             string
 }
 
 // Jar implements the http.CookieJar interface from the net/http package.
@@ -72,6 +79,29 @@ type Jar struct {
 	nextSeqNum uint64
 }
 
+var lock sync.Mutex
+
+// Load loads the file at path into v.
+// Use os.IsNotExist() to see if the returned error is due
+// to the file being missing.
+func Load(path string, v interface{}) error {
+	lock.Lock()
+	defer lock.Unlock()
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return Unmarshal(f, v)
+}
+
+// Unmarshal is a function that unmarshals the data from the
+// reader into the specified value.
+// By default, it uses the JSON unmarshaller.
+var Unmarshal = func(r io.Reader, v interface{}) error {
+	return json.NewDecoder(r).Decode(v)
+}
+
 // New returns a new cookie jar. A nil *Options is equivalent to a zero
 // Options.
 func New(o *Options) (*Jar, error) {
@@ -80,7 +110,18 @@ func New(o *Options) (*Jar, error) {
 	}
 	if o != nil {
 		jar.psList = o.PublicSuffixList
+		type b struct {
+			URL     url.URL
+			Cookies []*http.Cookie
+		}
+		var cookies *b = &b{}
+		configPath, _ := homedir.Expand("~/.saml2aws.cookies")
+		if err := Load(configPath, cookies); err != nil {
+			return nil, err
+		}
+		jar.SetCookies(&cookies.URL, cookies.Cookies)
 	}
+
 	return jar, nil
 }
 
@@ -222,11 +263,50 @@ func (j *Jar) cookies(u *url.URL, now time.Time) (cookies []*http.Cookie) {
 	return cookies
 }
 
+// Marshal is a function that marshals the object into an
+// io.Reader.
+// By default, it uses the JSON marshaller.
+var Marshal = func(v interface{}) (io.Reader, error) {
+	b, err := json.MarshalIndent(v, "", "\t")
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(b), nil
+}
+
+// Save saves a representation of v to the file at path.
+func Save(path string, v interface{}) error {
+	lock.Lock()
+	defer lock.Unlock()
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	r, err := Marshal(v)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(f, r)
+	return err
+}
+
+type persistedCookie struct {
+	URL     url.URL
+	Cookies []*http.Cookie
+}
+
 // SetCookies implements the SetCookies method of the http.CookieJar interface.
 //
 // It does nothing if the URL's scheme is not HTTP or HTTPS.
 func (j *Jar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	j.setCookies(u, cookies, time.Now())
+	p := &persistedCookie{
+		URL:     *u,
+		Cookies: cookies,
+	}
+	configPath, _ := homedir.Expand("~/.saml2aws.cookies")
+	Save(configPath, p)
 }
 
 // setCookies is like SetCookies but takes the current time as parameter.
