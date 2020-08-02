@@ -46,6 +46,7 @@ type IDPAccount struct {
 	Region               string `ini:"region"`
 	HttpAttemptsCount    string `ini:"http_attempts_count"`
 	HttpRetryDelay       string `ini:"http_retry_delay"`
+	CookieJarFilename    string `ini:"cookie_jar_filename"`
 }
 
 func (ia IDPAccount) String() string {
@@ -192,6 +193,9 @@ func (cm *ConfigManager) LoadIDPAccount(idpAccountName string) (*IDPAccount, err
 	account, err := readAccount(idpAccountName, cfg)
 	if err != nil {
 		return nil, errors.Wrap(err, "Unable to read idp account")
+	}
+	if account.CookieJarFilename == "" {
+		account.CookieJarFilename = fmt.Sprintf("%s-%s.cookies", cm.configPath, idpAccountName)
 	}
 
 	return account, nil

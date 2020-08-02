@@ -32,9 +32,10 @@ const (
 )
 
 type HTTPClientOptions struct {
-	IsWithRetries bool //http retry feature switch
-	AttemptsCount uint
-	RetryDelay    time.Duration
+	IsWithRetries     bool //http retry feature switch
+	AttemptsCount     uint
+	RetryDelay        time.Duration
+	CookieJarFilename string
 }
 
 // NewDefaultTransport configure a transport with the TLS skip verify option
@@ -70,6 +71,8 @@ func BuildHttpClientOpts(account *cfg.IDPAccount) *HTTPClientOptions {
 		opts.RetryDelay = time.Duration(delay) * time.Second
 	}
 
+	opts.CookieJarFilename = account.CookieJarFilename
+
 	return opts
 }
 
@@ -78,6 +81,7 @@ func NewHTTPClient(tr http.RoundTripper, opts *HTTPClientOptions) (*HTTPClient, 
 
 	options := &cookiejar.Options{
 		PublicSuffixList: publicsuffix.List,
+		Filename:         opts.CookieJarFilename,
 	}
 
 	jar, err := cookiejar.New(options)

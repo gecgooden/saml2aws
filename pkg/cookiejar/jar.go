@@ -19,8 +19,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/mitchellh/go-homedir"
 )
 
 // PublicSuffixList provides the public suffix of a domain. For example:
@@ -60,7 +58,7 @@ type Options struct {
 	// secure: it means that the HTTP server for foo.co.uk can set a cookie
 	// for bar.co.uk.
 	PublicSuffixList PublicSuffixList
-	Path             string
+	Filename         string
 }
 
 // Jar implements the http.CookieJar interface from the net/http package.
@@ -77,6 +75,8 @@ type Jar struct {
 	// nextSeqNum is the next sequence number assigned to a new cookie
 	// created SetCookies.
 	nextSeqNum uint64
+
+	Filename string
 }
 
 var lock sync.Mutex
@@ -88,10 +88,13 @@ func Load(path string, v interface{}) error {
 	lock.Lock()
 	defer lock.Unlock()
 	f, err := os.Open(path)
+	defer f.Close()
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 	return Unmarshal(f, v)
 }
 
@@ -106,7 +109,8 @@ var Unmarshal = func(r io.Reader, v interface{}) error {
 // Options.
 func New(o *Options) (*Jar, error) {
 	jar := &Jar{
-		entries: make(map[string]map[string]entry),
+		entries:  make(map[string]map[string]entry),
+		Filename: o.Filename,
 	}
 	if o != nil {
 		jar.psList = o.PublicSuffixList
@@ -115,11 +119,12 @@ func New(o *Options) (*Jar, error) {
 			Cookies []*http.Cookie
 		}
 		var cookies *b = &b{}
-		configPath, _ := homedir.Expand("~/.saml2aws.cookies")
-		if err := Load(configPath, cookies); err != nil {
+		if err := Load(jar.Filename, cookies); err != nil {
 			return nil, err
 		}
-		jar.SetCookies(&cookies.URL, cookies.Cookies)
+		if cookies != nil {
+			jar.SetCookies(&cookies.URL, cookies.Cookies)
+		}
 	}
 
 	return jar, nil
@@ -305,8 +310,7 @@ func (j *Jar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 		URL:     *u,
 		Cookies: cookies,
 	}
-	configPath, _ := homedir.Expand("~/.saml2aws.cookies")
-	Save(configPath, p)
+	Save(j.Filename, p)
 }
 
 // setCookies is like SetCookies but takes the current time as parameter.
